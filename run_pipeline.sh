@@ -84,10 +84,14 @@ if [ ! -d "$DATA_DIR" ]; then
   exit 1
 fi
 
+# Debug: List all files in the data directory
+echo -e "${YELLOW}Listing files in $DATA_DIR:${NC}"
+ls -la "$DATA_DIR"
+
 # Create combined directory if it doesn't exist
 mkdir -p "$DATA_DIR/combined"
 
-# Check if we need to create symlinks for the train/test splits
+# Check if we need to create dataset files for the train/test splits
 for family in "${FAMILIES[@]}"; do
   # Convert family name to the format expected by the scripts
   script_family="$family"
@@ -100,26 +104,50 @@ for family in "${FAMILIES[@]}"; do
   # Get the actual file name
   file_name=${FILE_NAMES[$family]}
   
+  echo -e "${YELLOW}Processing $family (script_family=$script_family, file_name=$file_name)${NC}"
+  
   # Check if train/test splits exist
   if [ ! -f "$DATA_DIR/combined/${script_family}_train.pkl" ] || [ ! -f "$DATA_DIR/combined/${script_family}_test.pkl" ]; then
-    echo -e "${YELLOW}Creating train/test split symlinks for $family${NC}"
+    echo -e "${YELLOW}Creating train/test split files for $family${NC}"
     
-    # Create symlinks to the actual train/test files
+    # Try to find and copy the train file
+    train_file=""
     if [ -f "$DATA_DIR/${file_name}_train.pkl" ]; then
-      ln -sf "$DATA_DIR/${file_name}_train.pkl" "$DATA_DIR/combined/${script_family}_train.pkl"
+      train_file="$DATA_DIR/${file_name}_train.pkl"
     elif [ -f "$DATA_DIR/$file_name.pkl" ]; then
-      # Fall back to the main file if train split doesn't exist
-      ln -sf "$DATA_DIR/$file_name.pkl" "$DATA_DIR/combined/${script_family}_train.pkl"
+      train_file="$DATA_DIR/$file_name.pkl"
     fi
     
+    # Try to find and copy the test file
+    test_file=""
     if [ -f "$DATA_DIR/${file_name}_test.pkl" ]; then
-      ln -sf "$DATA_DIR/${file_name}_test.pkl" "$DATA_DIR/combined/${script_family}_test.pkl"
+      test_file="$DATA_DIR/${file_name}_test.pkl"
     elif [ -f "$DATA_DIR/$file_name.pkl" ]; then
-      # Fall back to the main file if test split doesn't exist
-      ln -sf "$DATA_DIR/$file_name.pkl" "$DATA_DIR/combined/${script_family}_test.pkl"
+      test_file="$DATA_DIR/$file_name.pkl"
+    fi
+    
+    # Copy the files if found
+    if [ -n "$train_file" ]; then
+      echo -e "${GREEN}Copying $train_file to $DATA_DIR/combined/${script_family}_train.pkl${NC}"
+      cp "$train_file" "$DATA_DIR/combined/${script_family}_train.pkl"
+    else
+      echo -e "${RED}Error: Could not find train file for $family${NC}"
+      ls -la "$DATA_DIR" | grep -i "$file_name"
+    fi
+    
+    if [ -n "$test_file" ]; then
+      echo -e "${GREEN}Copying $test_file to $DATA_DIR/combined/${script_family}_test.pkl${NC}"
+      cp "$test_file" "$DATA_DIR/combined/${script_family}_test.pkl"
+    else
+      echo -e "${RED}Error: Could not find test file for $family${NC}"
+      ls -la "$DATA_DIR" | grep -i "$file_name"
     fi
   fi
 done
+
+# Debug: List all files in the combined directory
+echo -e "${YELLOW}Listing files in $DATA_DIR/combined:${NC}"
+ls -la "$DATA_DIR/combined"
 
 # Function to run model training for a specific variant and family
 run_training() {
