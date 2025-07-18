@@ -14,8 +14,8 @@
 #   --quick_test   Run a quick test with fewer epochs (default: false)
 #   --skip_train   Skip training and only run evaluation (default: false)
 
-# Default settings
-DATA_DIR="workspace/delay/data"
+# Default paths
+DATA_DIR="./data"
 EPOCHS=50
 BATCH_SIZE=64
 QUICK_TEST=0
@@ -55,8 +55,13 @@ done
 mkdir -p "$CHECKPOINT_DIR"
 mkdir -p "./results"
 
-# Dataset families
+# Dataset families with their file names
+declare -A FILE_NAMES
 FAMILIES=("mackey_glass" "delayed_logistic" "neutral_dde" "reaction_diffusion")
+FILE_NAMES["mackey_glass"]="mackey_glass"
+FILE_NAMES["delayed_logistic"]="delayed_logistic"
+FILE_NAMES["neutral_dde"]="neutral_dde"
+FILE_NAMES["reaction_diffusion"]="reaction_diffusion"
 
 # Color formatting for output
 GREEN='\033[0;32m'
@@ -92,13 +97,27 @@ for family in "${FAMILIES[@]}"; do
     script_family="neutral"
   fi
   
+  # Get the actual file name
+  file_name=${FILE_NAMES[$family]}
+  
   # Check if train/test splits exist
   if [ ! -f "$DATA_DIR/combined/${script_family}_train.pkl" ] || [ ! -f "$DATA_DIR/combined/${script_family}_test.pkl" ]; then
     echo -e "${YELLOW}Creating train/test split symlinks for $family${NC}"
     
-    # Create symlinks to the original dataset files
-    ln -sf "$DATA_DIR/$family/$family.pkl" "$DATA_DIR/combined/${script_family}_train.pkl"
-    ln -sf "$DATA_DIR/$family/$family.pkl" "$DATA_DIR/combined/${script_family}_test.pkl"
+    # Create symlinks to the actual train/test files
+    if [ -f "$DATA_DIR/${file_name}_train.pkl" ]; then
+      ln -sf "$DATA_DIR/${file_name}_train.pkl" "$DATA_DIR/combined/${script_family}_train.pkl"
+    elif [ -f "$DATA_DIR/$file_name.pkl" ]; then
+      # Fall back to the main file if train split doesn't exist
+      ln -sf "$DATA_DIR/$file_name.pkl" "$DATA_DIR/combined/${script_family}_train.pkl"
+    fi
+    
+    if [ -f "$DATA_DIR/${file_name}_test.pkl" ]; then
+      ln -sf "$DATA_DIR/${file_name}_test.pkl" "$DATA_DIR/combined/${script_family}_test.pkl"
+    elif [ -f "$DATA_DIR/$file_name.pkl" ]; then
+      # Fall back to the main file if test split doesn't exist
+      ln -sf "$DATA_DIR/$file_name.pkl" "$DATA_DIR/combined/${script_family}_test.pkl"
+    fi
   fi
 done
 
