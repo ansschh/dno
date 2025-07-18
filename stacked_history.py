@@ -22,8 +22,8 @@ from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from common import (
-    set_seed, DDEDataset, collate_pad, SpectralConvND, ChannelMLP,
+from common_py34 import (
+    set_seed, DDEDataset, collate_pad, SpectralConv, ChannelMLP,
     masked_mse, relative_l2, get_device, save_checkpoint, load_checkpoint, Timer
 )
 from common_logging import RunLogger
@@ -65,8 +65,8 @@ class StackedHistoryFNO(nn.Module):
         self.pointwise = nn.ModuleList()
         for _ in range(n_layers):
             self.spec_layers.append(
-                SpectralConvND(hidden_channels, hidden_channels,
-                               n_modes=(fourier_modes_s, fourier_modes_x))
+                SpectralConv(hidden_channels, hidden_channels,
+                               n_modes=(fourier_modes_s, fourier_modes_x), n_dims=2)
             )
             self.pointwise.append(nn.Conv2d(hidden_channels, hidden_channels, kernel_size=1))
 

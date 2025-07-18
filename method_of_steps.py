@@ -23,7 +23,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from common import (
+from common_py34 import (
     set_seed, DDEDataset, collate_pad, ChannelMLP,
     masked_mse, relative_l2, get_device, save_checkpoint, load_checkpoint, Timer
 )
