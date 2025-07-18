@@ -15,7 +15,7 @@
 #   --skip_train   Skip training and only run evaluation (default: false)
 
 # Default settings
-DATA_DIR="./data"
+DATA_DIR="workspace/delay/data"
 EPOCHS=50
 BATCH_SIZE=64
 QUICK_TEST=0
@@ -56,7 +56,7 @@ mkdir -p "$CHECKPOINT_DIR"
 mkdir -p "./results"
 
 # Dataset families
-FAMILIES=("mackey" "delayed_logistic" "neutral" "reaction_diffusion")
+FAMILIES=("mackey_glass" "delayed_logistic" "neutral_dde" "reaction_diffusion")
 
 # Color formatting for output
 GREEN='\033[0;32m'
@@ -79,10 +79,28 @@ if [ ! -d "$DATA_DIR" ]; then
   exit 1
 fi
 
-# Check for combined directory
-if [ ! -d "$DATA_DIR/combined" ]; then
-  echo -e "${YELLOW}WARNING: $DATA_DIR/combined not found. Will try using family-specific directories.${NC}"
-fi
+# Create combined directory if it doesn't exist
+mkdir -p "$DATA_DIR/combined"
+
+# Check if we need to create symlinks for the train/test splits
+for family in "${FAMILIES[@]}"; do
+  # Convert family name to the format expected by the scripts
+  script_family="$family"
+  if [ "$family" == "mackey_glass" ]; then
+    script_family="mackey"
+  elif [ "$family" == "neutral_dde" ]; then
+    script_family="neutral"
+  fi
+  
+  # Check if train/test splits exist
+  if [ ! -f "$DATA_DIR/combined/${script_family}_train.pkl" ] || [ ! -f "$DATA_DIR/combined/${script_family}_test.pkl" ]; then
+    echo -e "${YELLOW}Creating train/test split symlinks for $family${NC}"
+    
+    # Create symlinks to the original dataset files
+    ln -sf "$DATA_DIR/$family/$family.pkl" "$DATA_DIR/combined/${script_family}_train.pkl"
+    ln -sf "$DATA_DIR/$family/$family.pkl" "$DATA_DIR/combined/${script_family}_test.pkl"
+  fi
+done
 
 # Function to run model training for a specific variant and family
 run_training() {
@@ -121,14 +139,22 @@ run_training() {
   
   echo -e "${GREEN}[$variant - $family] Starting training...${NC}"
   
+  # Convert family name to the format expected by the scripts
+  script_family="$family"
+  if [ "$family" == "mackey_glass" ]; then
+    script_family="mackey"
+  elif [ "$family" == "neutral_dde" ]; then
+    script_family="neutral"
+  fi
+  
   # Execute the script with parameters
   python "$script_name" \
-    --family "$family" \
+    --family "$script_family" \
     --data_root "$DATA_DIR" \
     --epochs "$EPOCHS" \
     --batch_size "$BATCH_SIZE" \
     --checkpoint_dir "$CHECKPOINT_DIR" \
-    $extra_args 2>&1 | tee "./results/${variant}_${family}.log"
+    $extra_args 2>&1 | tee "./results/${variant}_${script_family}.log"
   
   # Check if the run was successful
   if [ $? -eq 0 ]; then
@@ -158,7 +184,15 @@ run_evaluation() {
   echo -e "${BLUE}===== Evaluating $variant on all families =====${NC}"
   
   for family in "${FAMILIES[@]}"; do
-    checkpoint_file="${CHECKPOINT_DIR}/${variant}_${family}.pt"
+    # Convert family name to the format expected by the scripts
+    script_family="$family"
+    if [ "$family" == "mackey_glass" ]; then
+      script_family="mackey"
+    elif [ "$family" == "neutral_dde" ]; then
+      script_family="neutral"
+    fi
+    
+    checkpoint_file="${CHECKPOINT_DIR}/${variant}_${script_family}.pt"
     
     if [ -f "$checkpoint_file" ]; then
       echo -e "${GREEN}[$variant] Evaluating on $family dataset...${NC}"
@@ -202,7 +236,15 @@ echo "---------------------------------" >> "./results/summary.txt"
 for variant in "stacked_history" "method_of_steps" "memory_kernel"; do
   echo "Model: $variant" >> "./results/summary.txt"
   for family in "${FAMILIES[@]}"; do
-    log_file="./results/${variant}_${family}.log"
+    # Convert family name to the format expected by the scripts
+    script_family="$family"
+    if [ "$family" == "mackey_glass" ]; then
+      script_family="mackey"
+    elif [ "$family" == "neutral_dde" ]; then
+      script_family="neutral"
+    fi
+    
+    log_file="./results/${variant}_${script_family}.log"
     if [ -f "$log_file" ]; then
       # Extract best validation result
       best_rel=$(grep -o "New best (rel.*)" "$log_file" | tail -1)
