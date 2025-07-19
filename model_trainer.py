@@ -31,17 +31,23 @@ class ModelTrainer:
         if model_type == 'stacked_history':
             # Ensure fourier_modes_x is adjusted for 1D data
             fourier_modes_x = config.get('fourier_modes_x', 16)
-            if input_channels == 1:
+            if output_channels == 1:
                 fourier_modes_x = min(fourier_modes_x, 1)
             
+            # Determine X dimension (spatial width)
+            # For reaction_diffusion (20D output), use output_channels as spatial dimension
+            # For 1D systems, use X=1
+            X = output_channels if output_channels > 1 else 1
+            
             model = StackedHistoryFNO(
-                fourier_modes_x=fourier_modes_x,
-                fourier_modes_t=config.get('fourier_modes_t', 16),
-                width=config.get('width', 64),
-                n_layers=config.get('n_layers', 4),
-                S=config.get('S', 32),
-                X=input_channels,
+                in_channels=output_channels,
                 out_channels=output_channels,
+                S=config.get('S', 32),
+                X=X,
+                fourier_modes_s=config.get('fourier_modes_s', config.get('fourier_modes_t', 16)),
+                fourier_modes_x=fourier_modes_x,
+                hidden_channels=config.get('width', 64),
+                n_layers=config.get('n_layers', 4),
                 dropout=config.get('dropout', 0.1)
             )
         
@@ -49,22 +55,20 @@ class ModelTrainer:
             model = MethodOfStepsModel(
                 S=config.get('S', 32),
                 step_out=config.get('step_out', 16),
-                hist_hidden=config.get('hist_hidden', 128),
-                tau_dim=config.get('tau_dim', 16),
-                predictor_hidden=config.get('predictor_hidden', 256),
-                predictor_layers=config.get('predictor_layers', 3),
-                out_len=config.get('step_out', 16),
+                roll_steps=config.get('roll_steps', 5),
+                in_channels=output_channels,
                 out_channels=output_channels,
-                dropout=config.get('dropout', 0.1)
+                hist_hidden=config.get('hist_hidden', 64),
+                hist_layers=config.get('hist_layers', 3),
+                tau_dim=config.get('tau_dim', 16),
+                predictor_hidden=config.get('predictor_hidden', 128)
             )
         
         elif model_type == 'memory_kernel':
             model = MemoryKernelModel(
                 S=config.get('S', 32),
                 channels=output_channels,
-                hidden=config.get('hidden', 128),
-                kernel_layers=config.get('kernel_layers', 3),
-                dropout=config.get('dropout', 0.1)
+                hidden=config.get('hidden', 64)
             )
         
         else:

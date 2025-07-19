@@ -102,6 +102,22 @@ class MemoryKernelModel(nn.Module):
         res = torch.stack(out, dim=-1)  # (B,C,S)
         return res.permute(0,2,1)       # (B,S,C)
 
+    def forward(self, hist_raw: torch.Tensor, tau: torch.Tensor = None):
+        """
+        Standard forward method for compatibility with evaluation framework.
+        hist_raw: (B, H_hist, C) - raw history data
+        tau: (B,) - delay values (not used in this implementation but kept for compatibility)
+        Returns: (B, T_pred, C) - predicted trajectory
+        """
+        # Resample history to fixed S points
+        hist_init = self.init_history(hist_raw)  # (B, S, C)
+        
+        # Use default parameters for Euler integration
+        dt = 0.05
+        steps = min(400, hist_raw.shape[1])  # Predict same length as input or max 400 steps
+        
+        return self.euler_roll(hist_init, steps, dt)
+    
     def euler_roll(self, hist_init: torch.Tensor, steps: int, dt: float):
         """
         hist_init: (B,S,C) includes the most recent value at index S-1 (time t=0).
@@ -116,8 +132,8 @@ class MemoryKernelModel(nn.Module):
             du = self.local(u_t) + kernel_term
             u_next = u_t + dt * du
             traj.append(u_next)
-            # Update history: drop first, append u_next
-            hist = torch.cat([hist[:,1:,:], u_next.unsqueeze(1)], dim=1)
+            # Shift history window
+            hist = torch.cat([hist[:, 1:, :], u_next.unsqueeze(1)], dim=1)
             u_t = u_next
         return torch.stack(traj, dim=1)  # (B, steps, C)
 

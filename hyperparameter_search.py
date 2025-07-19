@@ -19,7 +19,8 @@ import itertools
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple, Any, Optional, Union
+from typing_extensions import TypedDict, NotRequired
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -42,28 +43,60 @@ from hyperparameter_config import SearchConfig
 from experiment_tracker import ExperimentTracker
 from model_trainer import ModelTrainer
 
+# Import model classes
+from stacked_history import StackedHistoryFNO
+from method_of_steps import MethodOfStepsModel
+from memory_kernel import MemoryKernelModel
+
+def convert_numpy_types(obj):
+    """Convert numpy types to Python types for JSON serialization."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    else:
+        return obj
+
+class ExperimentResult(TypedDict):
+    """Type definition for experiment results."""
+    run_id: str
+    success: bool
+    error: NotRequired[str]
+    test_rel_error: float
+    model: str
+    family: str
+    search_type: str
+
 class HyperparameterSearcher:
     """Comprehensive hyperparameter search with multiple strategies."""
     
     def __init__(self, tracker: ExperimentTracker):
         self.tracker = tracker
         self.trainer = ModelTrainer()
-        self.results = []
+        self.results: List[ExperimentResult] = []
     
     def load_data(self, family: str, data_root: str = "./data") -> Tuple[DataLoader, DataLoader, DataLoader]:
         """Load train/validation/test data for given family."""
         # Map family names to file names
         family_map = {
-            'mackey': 'mackey',
+            'mackey': 'mackey_glass',
             'delayed_logistic': 'delayed_logistic', 
-            'neutral': 'neutral',
+            'neutral': 'neutral_dde',
             'reaction_diffusion': 'reaction_diffusion'
         }
         
         file_family = family_map.get(family, family)
         
-        train_path = os.path.join(data_root, "combined", f"{file_family}_train.pkl")
-        test_path = os.path.join(data_root, "combined", f"{file_family}_test.pkl")
+        # Use absolute path since we're in workspace/delay/dno/dno1/dno
+        data_dir = os.path.join(os.getcwd(), "data", "combined")
+        train_path = os.path.join(data_dir, f"{file_family}_train.pkl")
+        test_path = os.path.join(data_dir, f"{file_family}_test.pkl")
         
         if not os.path.exists(train_path) or not os.path.exists(test_path):
             raise FileNotFoundError(f"Data files not found for family {family}")
@@ -84,10 +117,33 @@ class HyperparameterSearcher:
         
         return train_loader, val_loader, test_loader
     
-    def _run_single_experiment(self, config: Dict[str, Any], max_epochs: int) -> Dict[str, Any]:
+    def _validate_and_convert_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and convert config parameters to correct types."""
+        # Integer parameters that must be converted
+        int_params = {
+            'fourier_modes_x', 'fourier_modes_t', 'fourier_modes_s', 'width', 'n_layers',
+            'S', 'step_out', 'hist_hidden', 'hist_layers', 'tau_dim', 'predictor_hidden',
+            'predictor_layers', 'hidden', 'kernel_layers', 'euler_steps', 'batch_size',
+            'roll_steps'
+        }
+        
+        # Convert parameters to correct types
+        validated_config = config.copy()
+        for param, value in validated_config.items():
+            if param in int_params and not isinstance(value, int):
+                validated_config[param] = int(float(value))
+            elif param in ['lr', 'weight_decay', 'dropout', 'euler_dt'] and not isinstance(value, float):
+                validated_config[param] = float(value)
+        
+        return validated_config
+    
+    def _run_single_experiment(self, config: Dict[str, Any], max_epochs: int) -> ExperimentResult:
         """Run a single hyperparameter experiment."""
         model_type = config['model']
         family = config['family']
+        
+        # Validate and convert config parameters
+        config = self._validate_and_convert_config(config)
         
         # Start tracking
         run_name = f"{model_type}_{family}_{config.get('search_type', 'manual')}"
@@ -95,7 +151,38 @@ class HyperparameterSearcher:
         
         try:
             # Load data with batch size from config
-            train_loader, val_loader, test_loader = self.load_data(family)
+            train_loader, val_loader, test_loader = self.load_data(family, data_root="./data")
+            
+            # Extract first sample to determine input/output dimensions
+            first_batch = next(iter(train_loader))
+            hist = first_batch["hist"]
+            y = first_batch["y"]
+            
+            # Determine output dimension and spatial width
+            if y.ndim == 3:
+                D_out = y.shape[2]
+                X = D_out if family == "reaction_diffusion" else 1
+            else:
+                D_out = 1
+                X = 1
+                
+            # Adjust fourier_modes_x if needed
+            if X == 1 and config.get('fourier_modes_x', 1) > 1:
+                print(f"Adjusting fourier_modes_x from {config['fourier_modes_x']} to 1 to match X dimension")
+                config['fourier_modes_x'] = 1
+            
+            # Handle parameter conversions for stacked_history
+            if model_type == 'stacked_history':
+                # Convert fourier_modes_t to fourier_modes_s if present
+                if 'fourier_modes_t' in config:
+                    config['fourier_modes_s'] = config.pop('fourier_modes_t')
+                
+                # Set default S if not provided
+                if 'S' not in config:
+                    config['S'] = 64  # Default value
+            
+            # Add family info to config for model creation
+            config['family'] = family
             
             # Update batch size if specified in config
             batch_size = config.get('batch_size', 32)
@@ -107,7 +194,7 @@ class HyperparameterSearcher:
                 test_loader = DataLoader(test_loader.dataset, batch_size=batch_size, 
                                        shuffle=False, collate_fn=collate_pad)
             
-            # Train and evaluate
+            # Train and evaluate using model_trainer
             results = self.trainer.train_and_evaluate(
                 model_type, config, train_loader, val_loader, test_loader,
                 max_epochs, self.tracker
@@ -130,13 +217,16 @@ class HyperparameterSearcher:
                 'run_id': run_id,
                 'success': False,
                 'error': str(e),
-                'test_rel_error': float('inf')
+                'test_rel_error': float('inf'),
+                'run_id': '',
+                'model': model_type,
+                'family': family
             }
             self.tracker.finish_run(results)
             return results
     
     def grid_search(self, model_type: str, family: str, max_epochs: int = 200,
-                   max_combinations: int = 100) -> List[Dict[str, Any]]:
+                   max_combinations: int = 100) -> List[ExperimentResult]:
         """Exhaustive grid search over hyperparameter space."""
         print(f"Starting grid search for {model_type} on {family}")
         
@@ -144,7 +234,15 @@ class HyperparameterSearcher:
         
         # Generate all combinations
         keys = list(search_space.keys())
-        values = list(search_space.values())
+        values: List[List[Union[float, int]]] = []
+        
+        for v in search_space.values():
+            if isinstance(v, list):
+                values.append([float(x) if isinstance(x, float) else int(x) for x in v])
+            else:
+                low, high = float(v[0]), float(v[1])
+                values.append([low + (high-low)*i/4 for i in range(5)])
+        
         combinations = list(itertools.product(*values))
         
         # Limit combinations if too many
@@ -167,7 +265,7 @@ class HyperparameterSearcher:
         return results
     
     def random_search(self, model_type: str, family: str, n_trials: int = 50,
-                     max_epochs: int = 200) -> List[Dict[str, Any]]:
+                     max_epochs: int = 200) -> List[ExperimentResult]:
         """Random search over hyperparameter space."""
         print(f"Starting random search for {model_type} on {family}")
         
@@ -181,12 +279,12 @@ class HyperparameterSearcher:
                 if isinstance(values, list):
                     config[param] = np.random.choice(values)
                 else:  # Continuous parameter
-                    low, high = values
+                    low, high = float(values[0]), float(values[1])  # Explicit type conversion
                     if param in ['lr', 'weight_decay']:
-                        config[param] = np.random.loguniform(low, high)
+                        config[param] = float(np.exp(np.random.uniform(np.log(low), np.log(high))))
                     else:
-                        config[param] = np.random.uniform(low, high)
-                        if param in ['fourier_modes_x', 'fourier_modes_t', 'width', 'n_layers',
+                        config[param] = float(np.random.uniform(low, high))
+                        if param in ['fourier_modes_x', 'fourier_modes_t', 'fourier_modes_s', 'width', 'n_layers',
                                    'S', 'step_out', 'hist_hidden', 'tau_dim', 'predictor_hidden',
                                    'predictor_layers', 'hidden', 'kernel_layers', 'euler_steps',
                                    'batch_size']:
@@ -202,7 +300,7 @@ class HyperparameterSearcher:
         return results
     
     def bayesian_search(self, model_type: str, family: str, n_trials: int = 100,
-                       max_epochs: int = 200) -> List[Dict[str, Any]]:
+                       max_epochs: int = 200) -> List[ExperimentResult]:
         """Bayesian optimization using Optuna."""
         if not OPTUNA_AVAILABLE:
             print("Optuna not available. Falling back to random search.")
@@ -212,22 +310,24 @@ class HyperparameterSearcher:
         
         results = []
         
-        def objective(trial):
+        def objective(trial) -> float:
             bounds = SearchConfig.BAYESIAN_BOUNDS[model_type]
-            config = {}
+            config: Dict[str, Union[float, int]] = {}
             
             for param, (low, high) in bounds.items():
+                low_val = float(low)
+                high_val = float(high)
                 if param in ['lr', 'weight_decay']:
-                    config[param] = trial.suggest_loguniform(param, low, high)
+                    config[param] = trial.suggest_float(param, low_val, high_val, log=True)
                 elif param in ['dropout', 'euler_dt']:
-                    config[param] = trial.suggest_uniform(param, low, high)
-                elif param in ['fourier_modes_x', 'fourier_modes_t', 'width', 'n_layers',
+                    config[param] = trial.suggest_float(param, low_val, high_val)
+                elif param in ['fourier_modes_x', 'fourier_modes_t', 'fourier_modes_s', 'width', 'n_layers',
                              'S', 'step_out', 'hist_hidden', 'tau_dim', 'predictor_hidden',
                              'predictor_layers', 'hidden', 'kernel_layers', 'euler_steps',
                              'batch_size']:
-                    config[param] = trial.suggest_int(param, int(low), int(high))
+                    config[param] = trial.suggest_int(param, int(low_val), int(high_val))
                 else:
-                    config[param] = trial.suggest_uniform(param, low, high)
+                    config[param] = trial.suggest_float(param, low_val, high_val)
             
             config.update({'model': model_type, 'family': family, 'search_type': 'bayesian'})
             
@@ -296,7 +396,7 @@ def main():
     # Save results
     results_file = f"search_results_{args.model}_{args.family}_{args.search_type}.json"
     with open(results_file, 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(convert_numpy_types(results), f, indent=2)
     
     # Print summary
     successful_results = [r for r in results if r.get('success', False)]

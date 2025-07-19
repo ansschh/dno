@@ -17,7 +17,8 @@ class SearchConfig:
     SEARCH_SPACES = {
         'stacked_history': {
             'fourier_modes_x': [8, 16, 32, 64],
-            'fourier_modes_t': [8, 16, 32, 64], 
+            'fourier_modes_s': [8, 16, 32, 64],  # Changed from fourier_modes_t to match model
+            'S': [32, 64, 128, 256],  # Added S parameter required by model
             'width': [32, 64, 128, 256],
             'n_layers': [2, 3, 4, 5, 6],
             'lr': [1e-5, 5e-5, 1e-4, 5e-4, 1e-3],
@@ -54,13 +55,14 @@ class SearchConfig:
     BAYESIAN_BOUNDS = {
         'stacked_history': {
             'fourier_modes_x': (4, 128),
-            'fourier_modes_t': (4, 128),
+            'fourier_modes_s': (4, 128),  # Changed from fourier_modes_t to match model
+            'S': (16, 512),  # Added S parameter required by model
             'width': (16, 512),
             'n_layers': (2, 8),
             'lr': (1e-6, 1e-2),
             'batch_size': (4, 128),
             'dropout': (0.0, 0.5),
-            'weight_decay': (0.0, 1e-3)
+            'weight_decay': (1e-8, 1e-3)
         },
         'method_of_steps': {
             'S': (8, 256),
@@ -72,7 +74,7 @@ class SearchConfig:
             'lr': (1e-6, 1e-2),
             'batch_size': (4, 128),
             'dropout': (0.0, 0.5),
-            'weight_decay': (0.0, 1e-3)
+            'weight_decay': (1e-8, 1e-3)
         },
         'memory_kernel': {
             'S': (8, 256),
@@ -83,6 +85,6 @@ class SearchConfig:
             'lr': (1e-6, 1e-2),
             'batch_size': (4, 128),
             'dropout': (0.0, 0.5),
-            'weight_decay': (0.0, 1e-3)
+            'weight_decay': (1e-8, 1e-3)
         }
     }

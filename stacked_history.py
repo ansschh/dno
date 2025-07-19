@@ -58,7 +58,7 @@ class StackedHistoryFNO(nn.Module):
         self.n_layers = n_layers
 
         # Lifting: (in + 2 coords) -> hidden
-        self.lift = ChannelMLP(in_channels + 2, hidden_channels, hidden_channels)
+        self.lift = ChannelMLP(in_channels + 2, hidden_channels)
 
         # Spectral blocks
         self.spec_layers = nn.ModuleList()
@@ -72,7 +72,7 @@ class StackedHistoryFNO(nn.Module):
 
         self.act = nn.GELU()
         self.dropout = nn.Dropout(dropout)
-        self.proj = ChannelMLP(hidden_channels, hidden_channels, out_channels)
+        self.proj = ChannelMLP(hidden_channels, out_channels)
 
     def resample_history(self, hist: torch.Tensor) -> torch.Tensor:
         """
@@ -140,10 +140,26 @@ class StackedHistoryFNO(nn.Module):
         # Flatten features for linear layer: we process all (S*X) points independently in channel dimension
         z = self.lift(h_plus.view(B * self.S * self.X, C + 2))
         z = z.view(B, self.S, self.X, self.hidden).permute(0, 3, 1, 2)  # (B, hidden, S, X)
+        
+        # Ensure tensor is 4D for SpectralConv - handle case where X=1 might cause issues
+        if self.X == 1 and z.size(-1) == 1:
+            # Ensure the last dimension is preserved for 2D spectral convolution
+            z = z.contiguous()
 
         # Spectral blocks
         for spec, pw in zip(self.spec_layers, self.pointwise):
+            # Ensure z is 4D for both SpectralConv and Conv2d
+            if z.dim() == 3:
+                z = z.unsqueeze(-1)  # Add X dimension if missing
+            
             z_spec = spec(z)  # (B, hidden, S, X)
+            
+            # Ensure z_spec has same dimensions as z for addition
+            if z_spec.dim() == 3 and z.dim() == 4:
+                z_spec = z_spec.unsqueeze(-1)
+            elif z_spec.dim() == 4 and z.dim() == 3:
+                z = z.unsqueeze(-1)
+                
             z = self.act(pw(z) + z_spec)
             z = self.dropout(z)
 

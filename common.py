@@ -42,13 +42,13 @@ class DDEDataset(Dataset):
     """
     def __init__(self,
                  pkl_path: str,
-                 family: str,
+                 family: Optional[str] = None,
                  force_min_len: Optional[int] = None):
         super().__init__()
         assert os.path.isfile(pkl_path), f"Missing dataset file {pkl_path}"
         with open(pkl_path, "rb") as f:
             self.samples = pickle.load(f)
-        self.family = family
+        self.family = family or "unknown"
         # Optional filter: remove extremely short trajectories
         if force_min_len is not None:
             self.samples = [s for s in self.samples if len(s[2]) >= force_min_len]
@@ -163,8 +163,15 @@ class SpectralConvND(nn.Module):
         dims = list(range(-self.n_dims, 0))
         x_ft = torch.fft.fftn(x, dim=dims)
         W = self.compl_weight()  # (O, I, m1, m2, ...)
-        # Slice each dimension to n_modes
-        slices = tuple(slice(0, m) for m in self.n_modes)
+        
+        # Ensure n_modes doesn't exceed input dimensions
+        actual_modes = []
+        for i, mode in enumerate(self.n_modes):
+            actual_size = x.shape[2 + i]  # Skip batch and channel dimensions
+            actual_modes.append(min(mode, actual_size))
+        
+        # Slice each dimension to actual modes
+        slices = tuple(slice(0, m) for m in actual_modes)
         # Use indexing without unpacking for Python 3.4 compatibility
         if len(slices) == 1:
             x_ft_trunc = x_ft[:, None, :, slices[0]]   # (B,1,C, m1)
@@ -174,20 +181,32 @@ class SpectralConvND(nn.Module):
             x_ft_trunc = x_ft[:, None, :, slices[0], slices[1], slices[2]]   # (B,1,C, m1,m2,m3)
         else:
             raise ValueError(f"Unsupported number of dimensions: {len(slices)}")
-        out_ft_trunc = torch.einsum("boi..., o i ... -> bo...", x_ft_trunc, W)
+            
+        # Truncate weight tensor to match actual modes if needed
+        W_slices = tuple(slice(0, m) for m in actual_modes)
+        if len(W_slices) == 1:
+            W_trunc = W[:, :, W_slices[0]]
+        elif len(W_slices) == 2:
+            W_trunc = W[:, :, W_slices[0], W_slices[1]]
+        elif len(W_slices) == 3:
+            W_trunc = W[:, :, W_slices[0], W_slices[1], W_slices[2]]
+        else:
+            raise ValueError(f"Unsupported number of dimensions: {len(W_slices)}")
+            
+        out_ft_trunc = torch.einsum("boi..., oi... -> bo...", x_ft_trunc, W_trunc)
         # Build a zero-filled tensor same size as x_ft (for inverse FFT)
         out_ft = torch.zeros((x.size(0), self.out_channels, *x.shape[2:]),
                              device=x.device, dtype=torch.cfloat)
         # Use indexing without unpacking for Python 3.4 compatibility
-        slices = tuple(slice(0, m) for m in self.n_modes)
-        if len(slices) == 1:
-            out_ft[:, :, slices[0]] = out_ft_trunc
-        elif len(slices) == 2:
-            out_ft[:, :, slices[0], slices[1]] = out_ft_trunc
-        elif len(slices) == 3:
-            out_ft[:, :, slices[0], slices[1], slices[2]] = out_ft_trunc
+        out_slices = tuple(slice(0, m) for m in actual_modes)
+        if len(out_slices) == 1:
+            out_ft[:, :, out_slices[0]] = out_ft_trunc
+        elif len(out_slices) == 2:
+            out_ft[:, :, out_slices[0], out_slices[1]] = out_ft_trunc
+        elif len(out_slices) == 3:
+            out_ft[:, :, out_slices[0], out_slices[1], out_slices[2]] = out_ft_trunc
         else:
-            raise ValueError(f"Unsupported number of dimensions: {len(slices)}")
+            raise ValueError(f"Unsupported number of dimensions: {len(out_slices)}")
         x_out = torch.fft.ifftn(out_ft, dim=dims).real
         return x_out
 
@@ -225,13 +244,7 @@ def load_checkpoint(path: str, model: nn.Module, optimizer: Optional[torch.optim
     return ckpt.get("epoch", 0), ckpt.get("best_metric", float("inf"))
 
 # ---------------------------
-# 7. Device Helper
-# ---------------------------
-def get_device():
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# ---------------------------
-# 8. Timer Context
+# 7. Timer Context
 # ---------------------------
 class Timer:
     def __enter__(self):
