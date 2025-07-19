@@ -150,7 +150,10 @@ class StackedHistoryFNO(nn.Module):
         # Project each (S,X) point individually
         z = z.permute(0, 2, 3, 1)  # (B,S,X,hidden)
         out = self.proj(z.reshape(B * self.S * self.X, self.hidden))
-        out = out.view(B, self.S, self.X, self.out_channels)
+        
+        # Get actual output size and reshape safely
+        actual_channels = out.size(-1)
+        out = out.reshape(B, self.S, self.X, actual_channels)
 
         # Collapse spatial if X>1 by averaging across X (for simple next-history prediction)
         # For reaction-diffusion where each "X" is a physical component you might keep it.
@@ -202,6 +205,9 @@ def evaluate(model, loader, device):
         mse = torch.mean((pred - target)**2).item()
         mse_sum += mse * hist.size(0)
         rel = relative_l2(pred, target)
+        # Move CUDA tensor to CPU before appending to list for numpy conversion
+        if isinstance(rel, torch.Tensor):
+            rel = rel.cpu().item()
         rel_list.append(rel)
         n_samples += hist.size(0)
     return mse_sum / n_samples, float(np.mean(rel_list))
@@ -257,10 +263,15 @@ def main():
         # Reaction-diffusion case => treat feature dimension as "spatial width"
         D_out = first_y.shape[1]
         X = D_out if args.family == "reaction_diffusion" else 1
+        
+    # Adjust fourier_modes_x based on X dimension to avoid dimension mismatch
+    if X == 1 and args.fourier_modes_x > 1:
+        print(f"Adjusting fourier_modes_x from {args.fourier_modes_x} to 1 to match X dimension")
+        args.fourier_modes_x = 1
 
     # Datasets / loaders
-    train_ds = DDEDataset(train_path, family=args.family)
-    test_ds  = DDEDataset(test_path,  family=args.family)
+    train_ds = DDEDataset(train_path)
+    test_ds  = DDEDataset(test_path)
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, collate_fn=collate_pad)
     test_loader  = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, collate_fn=collate_pad)
 

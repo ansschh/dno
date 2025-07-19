@@ -165,12 +165,29 @@ class SpectralConvND(nn.Module):
         W = self.compl_weight()  # (O, I, m1, m2, ...)
         # Slice each dimension to n_modes
         slices = tuple(slice(0, m) for m in self.n_modes)
-        x_ft_trunc = x_ft[:, None, :, *slices]   # (B,1,C, m1,m2,...)
+        # Use indexing without unpacking for Python 3.4 compatibility
+        if len(slices) == 1:
+            x_ft_trunc = x_ft[:, None, :, slices[0]]   # (B,1,C, m1)
+        elif len(slices) == 2:
+            x_ft_trunc = x_ft[:, None, :, slices[0], slices[1]]   # (B,1,C, m1,m2)
+        elif len(slices) == 3:
+            x_ft_trunc = x_ft[:, None, :, slices[0], slices[1], slices[2]]   # (B,1,C, m1,m2,m3)
+        else:
+            raise ValueError(f"Unsupported number of dimensions: {len(slices)}")
         out_ft_trunc = torch.einsum("boi..., o i ... -> bo...", x_ft_trunc, W)
         # Build a zero-filled tensor same size as x_ft (for inverse FFT)
         out_ft = torch.zeros((x.size(0), self.out_channels, *x.shape[2:]),
                              device=x.device, dtype=torch.cfloat)
-        out_ft[(...,) + tuple(slice(0, m) for m in self.n_modes)] = out_ft_trunc
+        # Use indexing without unpacking for Python 3.4 compatibility
+        slices = tuple(slice(0, m) for m in self.n_modes)
+        if len(slices) == 1:
+            out_ft[:, :, slices[0]] = out_ft_trunc
+        elif len(slices) == 2:
+            out_ft[:, :, slices[0], slices[1]] = out_ft_trunc
+        elif len(slices) == 3:
+            out_ft[:, :, slices[0], slices[1], slices[2]] = out_ft_trunc
+        else:
+            raise ValueError(f"Unsupported number of dimensions: {len(slices)}")
         x_out = torch.fft.ifftn(out_ft, dim=dims).real
         return x_out
 

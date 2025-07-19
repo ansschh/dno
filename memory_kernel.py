@@ -158,7 +158,11 @@ def evaluate(model, loader, device, S, euler_dt, euler_steps):
         target = y[:, :steps, :]
         mse = torch.mean((pred - target)**2).item()
         mse_sum += mse * B
-        rel_list.append(relative_l2(pred, target))
+        rel = relative_l2(pred, target)
+        # Move CUDA tensor to CPU before appending to list for numpy conversion
+        if isinstance(rel, torch.Tensor):
+            rel = rel.cpu().item()
+        rel_list.append(rel)
         n += B
     return mse_sum / n, float(np.mean(rel_list))
 
@@ -205,9 +209,9 @@ def main():
     else:
         channels = y0.shape[1]
 
-    train_ds = DDEDataset(train_path, args.family)
-    test_ds  = DDEDataset(test_path, args.family)
-    from common import collate_pad
+    train_ds = DDEDataset(train_path)
+    test_ds  = DDEDataset(test_path)
+    from common_py34 import collate_pad
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, collate_fn=collate_pad)
     test_loader  = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, collate_fn=collate_pad)
 

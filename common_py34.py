@@ -20,24 +20,68 @@ class DDEDataset(Dataset):
         with open(data_path, "rb") as f:
             data = pickle.load(f)
         
-        self.samples = data["samples"]
+        # Handle both list and dictionary formats
+        if isinstance(data, list):
+            self.samples = data
+        else:
+            self.samples = data["samples"]
+            
         if max_samples is not None:
             self.samples = self.samples[:max_samples]
         
-        # Extract dimensions
+        # Check the format of the first sample
         sample = self.samples[0]
-        self.hist_dim = sample["hist"].shape[-1] if len(sample["hist"].shape) > 1 else 1
-        self.out_dim = sample["y"].shape[-1] if len(sample["y"].shape) > 2 else 1
+        self.tuple_format = isinstance(sample, tuple)
+        
+        # Extract dimensions based on format
+        if self.tuple_format:
+            # Tuple format: (hist_dict, tau, t, y)
+            hist_data = sample[0]
+            y_data = sample[3]
+            self.hist_dim = 1  # Default to 1D for history
+            if len(y_data.shape) > 1:
+                self.out_dim = y_data.shape[1]
+            else:
+                self.out_dim = 1
+        else:
+            # Dictionary format
+            self.hist_dim = sample["hist"].shape[-1] if len(sample["hist"].shape) > 1 else 1
+            self.out_dim = sample["y"].shape[-1] if len(sample["y"].shape) > 2 else 1
     
     def __len__(self):
         return len(self.samples)
     
     def __getitem__(self, idx):
         sample = self.samples[idx]
-        hist = torch.tensor(sample["hist"], dtype=torch.float32)
-        tau = torch.tensor(sample["tau"], dtype=torch.float32)
-        t = torch.tensor(sample["t"], dtype=torch.float32)
-        y = torch.tensor(sample["y"], dtype=torch.float32)
+        
+        if self.tuple_format:
+            # Tuple format: (hist_dict, tau, t, y)
+            hist_dict, tau_val, t_vals, y_vals = sample
+            
+            # Extract history from the dictionary
+            if 't' in hist_dict and 'y' in hist_dict:
+                hist_t = hist_dict['t']
+                hist_y = hist_dict['y']
+                if isinstance(hist_y, list):
+                    # Convert nested list to array if needed
+                    hist = np.array(hist_y).squeeze()
+                else:
+                    hist = np.array(hist_y)
+            else:
+                # Fallback if history format is unexpected
+                hist = np.zeros(10)  # Default placeholder
+            
+            # Convert to tensors
+            hist = torch.tensor(hist, dtype=torch.float32)
+            tau = torch.tensor(tau_val, dtype=torch.float32)
+            t = torch.tensor(t_vals, dtype=torch.float32)
+            y = torch.tensor(y_vals, dtype=torch.float32)
+        else:
+            # Dictionary format
+            hist = torch.tensor(sample["hist"], dtype=torch.float32)
+            tau = torch.tensor(sample["tau"], dtype=torch.float32)
+            t = torch.tensor(sample["t"], dtype=torch.float32)
+            y = torch.tensor(sample["y"], dtype=torch.float32)
         
         # Ensure hist has shape (T, C) and y has shape (T, C)
         if len(hist.shape) == 1:
@@ -84,7 +128,11 @@ class SpectralConv(nn.Module):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.n_modes = n_modes if isinstance(n_modes, (list, tuple)) else [n_modes] * n_dims
+        # Ensure n_modes is always a list, not a tuple
+        if isinstance(n_modes, (list, tuple)):
+            self.n_modes = list(n_modes)
+        else:
+            self.n_modes = [n_modes] * n_dims
         self.n_dims = n_dims
         
         # Complex weights for each mode

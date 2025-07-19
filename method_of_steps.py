@@ -72,6 +72,8 @@ class StepOperator(nn.Module):
         self.out_channels = out_channels
 
     def forward(self, hist_vec, tau):
+        # Reshape tau to have correct dimensions [B, 1]
+        tau = tau.view(-1, 1)  # Ensure tau is [B, 1]
         tau_e = self.tau_embed(tau)   # (B, tau_dim)
         z = torch.cat([hist_vec, tau_e], dim=-1)
         out = self.predictor(z)
@@ -178,11 +180,17 @@ def evaluate(model, loader, device, rollout=False):
         else:
             steps = min(model.roll_steps, math.ceil(T / model.step_out))
             pred_full = model.rollout(hist, tau, steps)
-            pred = pred_full[:, :T, :]
-            target = y
+            # Ensure we only compare up to the minimum length between prediction and target
+            min_len = min(pred_full.shape[1], y.shape[1])
+            pred = pred_full[:, :min_len, :]
+            target = y[:, :min_len, :]
         mse = torch.mean((pred - target)**2).item()
         mse_sum += mse * B
-        rel_list.append(relative_l2(pred, target))
+        rel = relative_l2(pred, target)
+        # Move CUDA tensor to CPU before appending to list for numpy conversion
+        if isinstance(rel, torch.Tensor):
+            rel = rel.cpu().item()
+        rel_list.append(rel)
         n += B
     return mse_sum / n, float(np.mean(rel_list))
 
@@ -232,8 +240,8 @@ def main():
     else:
         out_channels = y0.shape[1]
 
-    train_ds = DDEDataset(train_path, args.family)
-    test_ds  = DDEDataset(test_path, args.family)
+    train_ds = DDEDataset(train_path)
+    test_ds  = DDEDataset(test_path)
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, collate_fn=collate_pad)
     test_loader  = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, collate_fn=collate_pad)
 

@@ -106,41 +106,49 @@ for family in "${FAMILIES[@]}"; do
   
   echo -e "${YELLOW}Processing $family (script_family=$script_family, file_name=$file_name)${NC}"
   
-  # Check if train/test splits exist
+  # Check if train/test splits exist with the expected script names
   if [ ! -f "$DATA_DIR/combined/${script_family}_train.pkl" ] || [ ! -f "$DATA_DIR/combined/${script_family}_test.pkl" ]; then
     echo -e "${YELLOW}Creating train/test split files for $family${NC}"
     
-    # Try to find and copy the train file
-    train_file=""
-    if [ -f "$DATA_DIR/${file_name}_train.pkl" ]; then
-      train_file="$DATA_DIR/${file_name}_train.pkl"
-    elif [ -f "$DATA_DIR/$file_name.pkl" ]; then
-      train_file="$DATA_DIR/$file_name.pkl"
-    fi
-    
-    # Try to find and copy the test file
-    test_file=""
-    if [ -f "$DATA_DIR/${file_name}_test.pkl" ]; then
-      test_file="$DATA_DIR/${file_name}_test.pkl"
-    elif [ -f "$DATA_DIR/$file_name.pkl" ]; then
-      test_file="$DATA_DIR/$file_name.pkl"
-    fi
-    
-    # Copy the files if found
-    if [ -n "$train_file" ]; then
-      echo -e "${GREEN}Copying $train_file to $DATA_DIR/combined/${script_family}_train.pkl${NC}"
-      cp "$train_file" "$DATA_DIR/combined/${script_family}_train.pkl"
+    # First check if files exist in the combined directory with the family name
+    if [ -f "$DATA_DIR/combined/${file_name}_train.pkl" ]; then
+      echo -e "${GREEN}Creating symlink from $DATA_DIR/combined/${file_name}_train.pkl to $DATA_DIR/combined/${script_family}_train.pkl${NC}"
+      # Use absolute paths for symlinks
+      TRAIN_ABS_PATH=$(readlink -f "$DATA_DIR/combined/${file_name}_train.pkl")
+      ln -sf "$TRAIN_ABS_PATH" "$DATA_DIR/combined/${script_family}_train.pkl"
     else
-      echo -e "${RED}Error: Could not find train file for $family${NC}"
-      ls -la "$DATA_DIR" | grep -i "$file_name"
+      echo -e "${RED}Error: Could not find ${file_name}_train.pkl in combined directory${NC}"
+      # Try to find in the family directory
+      if [ -f "$DATA_DIR/$family/$family.pkl" ]; then
+        echo -e "${GREEN}Copying $DATA_DIR/$family/$family.pkl to $DATA_DIR/combined/${script_family}_train.pkl${NC}"
+        cp "$DATA_DIR/$family/$family.pkl" "$DATA_DIR/combined/${script_family}_train.pkl"
+      elif [ -f "$DATA_DIR/$family.pkl" ]; then
+        echo -e "${GREEN}Copying $DATA_DIR/$family.pkl to $DATA_DIR/combined/${script_family}_train.pkl${NC}"
+        cp "$DATA_DIR/$family.pkl" "$DATA_DIR/combined/${script_family}_train.pkl"
+      else
+        echo -e "${RED}Error: Could not find any suitable train file for $family${NC}"
+        ls -la "$DATA_DIR/combined" | grep -i "${file_name}"
+      fi
     fi
     
-    if [ -n "$test_file" ]; then
-      echo -e "${GREEN}Copying $test_file to $DATA_DIR/combined/${script_family}_test.pkl${NC}"
-      cp "$test_file" "$DATA_DIR/combined/${script_family}_test.pkl"
+    if [ -f "$DATA_DIR/combined/${file_name}_test.pkl" ]; then
+      echo -e "${GREEN}Creating symlink from $DATA_DIR/combined/${file_name}_test.pkl to $DATA_DIR/combined/${script_family}_test.pkl${NC}"
+      # Use absolute paths for symlinks
+      TEST_ABS_PATH=$(readlink -f "$DATA_DIR/combined/${file_name}_test.pkl")
+      ln -sf "$TEST_ABS_PATH" "$DATA_DIR/combined/${script_family}_test.pkl"
     else
-      echo -e "${RED}Error: Could not find test file for $family${NC}"
-      ls -la "$DATA_DIR" | grep -i "$file_name"
+      echo -e "${RED}Error: Could not find ${file_name}_test.pkl in combined directory${NC}"
+      # Try to find in the family directory
+      if [ -f "$DATA_DIR/$family/$family.pkl" ]; then
+        echo -e "${GREEN}Copying $DATA_DIR/$family/$family.pkl to $DATA_DIR/combined/${script_family}_test.pkl${NC}"
+        cp "$DATA_DIR/$family/$family.pkl" "$DATA_DIR/combined/${script_family}_test.pkl"
+      elif [ -f "$DATA_DIR/$family.pkl" ]; then
+        echo -e "${GREEN}Copying $DATA_DIR/$family.pkl to $DATA_DIR/combined/${script_family}_test.pkl${NC}"
+        cp "$DATA_DIR/$family.pkl" "$DATA_DIR/combined/${script_family}_test.pkl"
+      else
+        echo -e "${RED}Error: Could not find any suitable test file for $family${NC}"
+        ls -la "$DATA_DIR/combined" | grep -i "${file_name}"
+      fi
     fi
   fi
 done
