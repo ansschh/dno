@@ -45,7 +45,7 @@ class AdvancedVisualizer:
             'figure.dpi': 300,
             'savefig.dpi': 300,
             'font.size': 12,
-            'axes.titlesize': 14,
+            'axes.titlesize': 10,
             'axes.labelsize': 12,
             'xtick.labelsize': 10,
             'ytick.labelsize': 10,
