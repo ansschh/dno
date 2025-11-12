@@ -15,7 +15,7 @@ import seaborn as sns
 from numpy.fft import rfft, rfftfreq
 
 plt.rcParams.update({
-    "figure.dpi": 120,
+    "figure.dpi": 1210,
     "savefig.dpi": 300,
     "font.size": 11,
     "axes.grid": True,
